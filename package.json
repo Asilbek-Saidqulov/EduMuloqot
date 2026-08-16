@@ -1,0 +1,38 @@
+{
+  "name": "edu-murojaat-bot",
+  "version": "0.1.0",
+  "description": "Maktab-mahalla-ota-ona elektron murojaatlar tizimi (Telegram Bot MVP)",
+  "main": "dist/app.js",
+  "scripts": {
+    "dev": "tsx watch src/app.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/app.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "seed": "tsx src/database/seed.ts",
+    "import:students": "tsx src/database/importStudents.ts",
+    "test:phase4": "tsx src/__tests__/phase4Tests.ts",
+    "test:phase5": "tsx src/__tests__/phase5Tests.ts",
+    "test:phase7": "tsx src/__tests__/phase7Tests.ts",
+    "test:phase8": "tsx src/__tests__/phase8Tests.ts",
+    "test:phase9": "tsx src/__tests__/phase9SecurityTests.ts",
+    "test:phase10": "tsx src/__tests__/phase10HardeningTests.ts",
+    "test:phase1to3": "tsx src/__tests__/phase1to3Regression.ts",
+    "test:claim": "tsx src/database/__tests__/claimIntegrationTest.ts",
+    "test": "tsx src/__tests__/phase1to3Regression.ts && tsx src/__tests__/phase4Tests.ts && tsx src/__tests__/phase5Tests.ts && tsx src/__tests__/phase7Tests.ts && tsx src/__tests__/phase8Tests.ts && tsx src/__tests__/phase9SecurityTests.ts"
+  },
+  "dependencies": {
+    "@grammyjs/conversations": "^1.2.0",
+    "@prisma/client": "^5.22.0",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.30.0",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "prisma": "^5.22.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

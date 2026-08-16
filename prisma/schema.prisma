@@ -1,0 +1,457 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                  Int                    @id @default(autoincrement())
+  telegramId          BigInt                 @unique
+  fullName            String?
+  createdAt           DateTime               @default(now())
+  phone               String?
+  neighborhoodId      Int?
+  schoolId            Int?
+  isActive            Boolean                @default(true)
+  parentRole          ParentRole?
+  role                UserRole               @default(PARENT)
+  // Phase 10: TEACHER subject (free text, assigned by admin).
+  // Required for TEACHER role. Null for other roles.
+  teacherSubject      String?
+  // Phase 10: CLASS_TEACHER assigned class (e.g. "11-A").
+  // Required for CLASS_TEACHER role. Null for other roles.
+  // Enforced at the service layer — CLASS_TEACHER can only access this class.
+  assignedClassName   String?
+  attendanceAuditLogs AttendanceAuditLog[]   @relation("AttendanceAuditActor")
+  escalationActions   AttendanceEscalation[] @relation("EscalationActor")
+  recordedAttendance  Attendance[]           @relation("AttendanceRecorder")
+  messages            ComplaintMessage[]     @relation("MessageSender")
+  complaints          Complaint[]            @relation("ComplaintSender")
+  familyMemberships   FamilyMember?
+  students            Student[]
+  applications        StudentApplication[]
+  neighborhood        Neighborhood?          @relation(fields: [neighborhoodId], references: [id])
+  school              School?                @relation(fields: [schoolId], references: [id])
+
+  @@map("users")
+}
+
+model Admin {
+  id                   Int                   @id @default(autoincrement())
+  telegramId           BigInt                @unique
+  fullName             String?
+  schoolId             Int?
+  neighborhoodId       Int?
+  createdAt            DateTime              @default(now())
+  role                 AdminRole             @default(SCHOOL_ADMIN)
+  isActive             Boolean               @default(true)
+  actorLogs            AdminActionLog[]      @relation("AdminActor")
+  targetLogs           AdminActionLog[]      @relation("AdminTarget")
+  responsibilities     AdminResponsibility[]
+  neighborhood         Neighborhood?         @relation(fields: [neighborhoodId], references: [id])
+  school               School?               @relation(fields: [schoolId], references: [id])
+  fromAssignments      ComplaintAssignment[] @relation("AdminAssignments")
+  toAssignments        ComplaintAssignment[] @relation("ComplaintAssignments")
+  sentMessages         ComplaintMessage[]    @relation("AdminMessageSender")
+  assignedComplaints   Complaint[]           @relation("ComplaintAssignments")
+  resolvedApplications StudentApplication[]
+
+  @@map("admins")
+}
+
+model School {
+  id           Int                    @id @default(autoincrement())
+  name         String
+  createdAt    DateTime               @default(now())
+  admins       Admin[]
+  escalations  AttendanceEscalation[]
+  attendance   Attendance[]
+  complaints   Complaint[]
+  students     Student[]
+  users        User[]
+  applications StudentApplication[]
+
+  @@map("schools")
+}
+
+model AdminResponsibility {
+  id             Int            @id @default(autoincrement())
+  adminId        Int
+  responsibility Responsibility
+  createdAt      DateTime       @default(now())
+  admin          Admin          @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@unique([adminId, responsibility])
+  @@map("admin_responsibilities")
+}
+
+model Neighborhood {
+  id          Int                    @id @default(autoincrement())
+  name        String
+  createdAt   DateTime               @default(now())
+  admins      Admin[]
+  escalations AttendanceEscalation[]
+  complaints  Complaint[]
+  users       User[]
+
+  @@map("neighborhoods")
+}
+
+model Student {
+  id                 Int                       @id @default(autoincrement())
+  parentId           Int?
+  schoolId           Int
+  fullName           String
+  className          String
+  createdAt          DateTime                  @default(now())
+  verificationStatus StudentVerificationStatus @default(PENDING)
+  pinfl              String?                   @unique
+  birthDate          DateTime?
+  // Phase 8: Archive lifecycle. null = active student, non-null = archived
+  // (graduated/transferred/left). Soft-archive — preserves all historical
+  // data (attendance, family links, complaints). Archived students are
+  // excluded from active rosters and reports by default.
+  archivedAt         DateTime?
+  escalations        AttendanceEscalation[]
+  attendance         Attendance[]
+  complaints         Complaint[]
+  familyLinks        FamilyStudent?
+  applications       StudentApplication[]
+  parent             User?                     @relation(fields: [parentId], references: [id])
+  school             School                    @relation(fields: [schoolId], references: [id])
+
+  @@index([schoolId, fullName, className])
+  @@index([schoolId, archivedAt])
+  @@map("students")
+}
+
+model StudentApplication {
+  id              Int                      @id @default(autoincrement())
+  applicantUserId Int
+  schoolId        Int
+  fullName        String
+  className       String?
+  phone           String?
+  note            String?
+  status          StudentApplicationStatus @default(PENDING)
+  resolvedById    Int?
+  resolvedAt      DateTime?
+  resolutionNote  String?
+  studentId       Int?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  applicant       User                     @relation(fields: [applicantUserId], references: [id], onDelete: Cascade)
+  school          School                   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  resolver        Admin?                   @relation(fields: [resolvedById], references: [id])
+  student         Student?                 @relation(fields: [studentId], references: [id])
+
+  @@index([schoolId, status])
+  @@index([applicantUserId, schoolId, status])
+  @@map("student_applications")
+}
+
+model Complaint {
+  id                Int                   @id @default(autoincrement())
+  complaintNumber   String                @unique
+  senderId          Int
+  targetType        ComplaintTargetType
+  schoolId          Int?
+  studentId         Int?
+  neighborhoodId    Int?
+  category          String
+  description       String
+  status            ComplaintStatus       @default(NEW)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  assignedToAdminId Int?
+  assignments       ComplaintAssignment[]
+  attachments       ComplaintAttachment[]
+  messages          ComplaintMessage[]
+  assignedToAdmin   Admin?                @relation("ComplaintAssignments", fields: [assignedToAdminId], references: [id])
+  neighborhood      Neighborhood?         @relation(fields: [neighborhoodId], references: [id])
+  school            School?               @relation(fields: [schoolId], references: [id])
+  sender            User                  @relation("ComplaintSender", fields: [senderId], references: [id])
+  student           Student?              @relation(fields: [studentId], references: [id])
+
+  @@index([schoolId, targetType, status])
+  @@index([neighborhoodId, targetType, status])
+  @@index([senderId])
+  @@index([assignedToAdminId])
+  @@map("complaints")
+}
+
+model ComplaintMessage {
+  id            Int                        @id @default(autoincrement())
+  complaintId   Int
+  senderId      Int?
+  message       String
+  createdAt     DateTime                   @default(now())
+  senderType    ComplaintMessageSenderType @default(PARENT)
+  senderAdminId Int?
+  complaint     Complaint                  @relation(fields: [complaintId], references: [id])
+  senderAdmin   Admin?                     @relation("AdminMessageSender", fields: [senderAdminId], references: [id])
+  sender        User?                      @relation("MessageSender", fields: [senderId], references: [id], onDelete: Restrict)
+
+  @@index([senderAdminId])
+  @@map("complaint_messages")
+}
+
+model ComplaintAttachment {
+  id          Int       @id @default(autoincrement())
+  complaintId Int
+  fileId      String
+  fileType    String
+  createdAt   DateTime  @default(now())
+  complaint   Complaint @relation(fields: [complaintId], references: [id])
+
+  @@map("complaint_attachments")
+}
+
+model ComplaintAssignment {
+  id          Int       @id @default(autoincrement())
+  complaintId Int
+  fromAdminId Int?
+  toAdminId   Int
+  note        String?
+  assignedAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  complaint   Complaint @relation(fields: [complaintId], references: [id])
+  fromAdmin   Admin?    @relation("AdminAssignments", fields: [fromAdminId], references: [id])
+  toAdmin     Admin     @relation("ComplaintAssignments", fields: [toAdminId], references: [id])
+
+  @@map("complaint_assignments")
+}
+
+model AdminActionLog {
+  id            Int      @id @default(autoincrement())
+  actorAdminId  Int
+  targetAdminId Int?
+  action        String
+  details       String?
+  createdAt     DateTime @default(now())
+  actorAdmin    Admin    @relation("AdminActor", fields: [actorAdminId], references: [id])
+  targetAdmin   Admin?   @relation("AdminTarget", fields: [targetAdminId], references: [id])
+
+  @@map("admin_action_logs")
+}
+
+model BotSession {
+  telegramId BigInt @id
+  data       Json
+
+  @@map("bot_sessions")
+}
+
+model Family {
+  id          Int                @id @default(autoincrement())
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  invitations FamilyInvitation[]
+  members     FamilyMember[]
+  students    FamilyStudent[]
+
+  @@map("families")
+}
+
+model FamilyMember {
+  id         Int        @id @default(autoincrement())
+  familyId   Int
+  userId     Int        @unique
+  parentRole ParentRole
+  createdAt  DateTime   @default(now())
+  family     Family     @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, parentRole])
+  @@map("family_members")
+}
+
+model FamilyStudent {
+  id        Int      @id @default(autoincrement())
+  familyId  Int
+  studentId Int      @unique
+  createdAt DateTime @default(now())
+  family    Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, studentId])
+  @@map("family_students")
+}
+
+model FamilyInvitation {
+  id        Int       @id @default(autoincrement())
+  familyId  Int
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdBy Int
+  createdAt DateTime  @default(now())
+  family    Family    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@map("family_invitations")
+}
+
+model StaffActionLog {
+  id           Int      @id @default(autoincrement())
+  actorUserId  Int
+  targetUserId Int
+  action       String
+  oldRole      String?
+  newRole      String?
+  schoolId     Int?
+  details      String?
+  createdAt    DateTime @default(now())
+
+  @@index([targetUserId])
+  @@index([actorUserId])
+  @@map("staff_action_logs")
+}
+
+model Attendance {
+  id            Int                  @id @default(autoincrement())
+  studentId     Int
+  date          DateTime             @db.Date
+  status        AttendanceStatus
+  recordedById  Int
+  schoolId      Int
+  className     String
+  // Phase 10: Subject under which attendance was recorded.
+  // Persisted historically — if teacher's subject changes later,
+  // old attendance still shows the original subject.
+  subject       String?
+  note          String?
+  // Phase 10: Parent-submitted absence reason (visible ONLY to CLASS_TEACHER).
+  // Null when no reason has been submitted. Set by the parent via
+  // the "📝 Sababini bildirish" button on the absence notification.
+  absenceReason String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  // Phase 8: Archive lifecycle. null = active record, non-null = archived
+  // (old record moved to historical state). Soft-archive — preserves
+  // all data. Archived records are excluded from active reports by default.
+  archivedAt    DateTime?
+  auditLogs     AttendanceAuditLog[]
+  recordedBy    User                 @relation("AttendanceRecorder", fields: [recordedById], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  school        School               @relation(fields: [schoolId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student       Student              @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([studentId, date])
+  @@index([studentId, date])
+  @@index([schoolId, date])
+  @@index([schoolId, className, date])
+  @@index([recordedById])
+  @@index([archivedAt, date])
+  @@map("attendances")
+}
+
+model AttendanceAuditLog {
+  id           Int               @id @default(autoincrement())
+  attendanceId Int
+  actorUserId  Int
+  oldStatus    AttendanceStatus?
+  newStatus    AttendanceStatus
+  note         String?
+  createdAt    DateTime          @default(now())
+  actor        User              @relation("AttendanceAuditActor", fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  attendance   Attendance        @relation(fields: [attendanceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([attendanceId])
+  @@index([actorUserId])
+  @@map("attendance_audit_logs")
+}
+
+model AttendanceEscalation {
+  id             Int          @id @default(autoincrement())
+  studentId      Int
+  schoolId       Int
+  neighborhoodId Int
+  absenceCount   Int
+  thresholdDate  DateTime     @db.Date
+  actorUserId    Int
+  notifiedAt     DateTime     @default(now())
+  resolvedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  actor          User         @relation("EscalationActor", fields: [actorUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  neighborhood   Neighborhood @relation(fields: [neighborhoodId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  school         School       @relation(fields: [schoolId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  student        Student      @relation(fields: [studentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([studentId, thresholdDate])
+  @@index([studentId])
+  @@index([neighborhoodId])
+  @@index([schoolId])
+  @@map("attendance_escalations")
+}
+
+enum ComplaintTargetType {
+  SCHOOL
+  NEIGHBORHOOD
+}
+
+enum ComplaintStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+  ASSIGNED
+}
+
+enum StudentVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum AdminRole {
+  SCHOOL_ADMIN
+  NEIGHBORHOOD_ADMIN
+  SUPER_ADMIN
+}
+
+enum UserRole {
+  STUDENT
+  PARENT
+  TEACHER
+  CLASS_TEACHER
+  SCHOOL_ADMIN
+  MAHALLA_RESPONSIBLE
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum ParentRole {
+  FATHER
+  MOTHER
+}
+
+enum Responsibility {
+  COMPLAINT_MANAGER
+  PSYCHOLOGIST
+  SOCIAL_WORKER
+  EDUCATION
+  DISCIPLINE
+  STUDENT_AFFAIRS
+}
+
+enum ComplaintMessageSenderType {
+  PARENT
+  ADMIN
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum StudentApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
